@@ -1,0 +1,66 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    name: unsigned ipa
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: toolchain
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+
+      - name: generate project
+        run: xcodegen generate --spec project.yml
+
+      - name: build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project TubeFree.xcodeproj \
+            -scheme TubeFree \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS=arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: package ipa
+        run: |
+          APP="build/Build/Products/Release-iphoneos/TubeFree.app"
+          test -d "$APP"
+          rm -rf out && mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out
+          zip -qry TubeFree.ipa Payload
+          ls -lh TubeFree.ipa
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TubeFree-ipa
+          path: out/TubeFree.ipa
+          if-no-files-found: error
+
+      - name: release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/TubeFree.ipa
+          generate_release_notes: true

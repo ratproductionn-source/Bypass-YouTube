@@ -1,0 +1,21 @@
+# xcode
+*.xcodeproj/
+*.xcworkspace/
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# os
+.DS_Store
+Thumbs.db
+
+# editors
+.vscode/
+.idea/
+*.swp
+
+# swift
+.swiftpm/
+Package.resolved
