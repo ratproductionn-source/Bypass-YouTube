@@ -276,10 +276,16 @@ enum InnerTube {
 
     static func suggest(_ query: String) async throws -> [String] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2,
-              let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl=en&q=\(encoded)")
-        else { return [] }
+        guard trimmed.count >= 2 else { return [] }
+
+        var comps = URLComponents(string: "https://suggestqueries.google.com/complete/search")
+        comps?.queryItems = [
+            URLQueryItem(name: "client", value: "firefox"),
+            URLQueryItem(name: "ds", value: "yt"),
+            URLQueryItem(name: "hl", value: "en"),
+            URLQueryItem(name: "q", value: trimmed)
+        ]
+        guard let url = comps?.url else { return [] }
 
         var request = URLRequest(url: url)
         request.setValue(Client.webEmbedded.userAgent, forHTTPHeaderField: "User-Agent")
