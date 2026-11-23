@@ -1,14 +1,28 @@
 name: probe
 
-# Account health check. Runs in ~5 seconds on a Linux runner.
-# Green = GitHub will schedule jobs for this account.
-# Cancelled with zero steps = account-level block, not a YAML problem.
+# Runner availability check. Each leg is independent (fail-fast: false),
+# so the ones that are supported by this account will report green while
+# unsupported labels report "configuration ... is not supported".
 on:
   workflow_dispatch:
 
 jobs:
-  hello:
-    name: runner alive
-    runs-on: ubuntu-latest
+  runners:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.label }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        label:
+          - ubuntu-latest
+          - macos-13
+          - macos-14
+          - macos-15
+          - macos-latest
     steps:
-      - run: echo "runner alive on $(uname -a)"
+      - name: alive
+        run: |
+          echo "label: ${{ matrix.label }}"
+          uname -a
+          xcodebuild -version || true
