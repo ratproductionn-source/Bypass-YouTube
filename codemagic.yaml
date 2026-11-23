@@ -1,0 +1,45 @@
+workflows:
+  ios-unsigned:
+    name: TubeFree unsigned IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+      vars:
+        PROJECT: TubeFree.xcodeproj
+        SCHEME: TubeFree
+    scripts:
+      - name: Generate Xcode project
+        script: |
+          brew install xcodegen
+          xcodegen generate --spec project.yml
+          ls -la "$PROJECT"
+
+      - name: Build unsigned app
+        script: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS=arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        script: |
+          APP="build/Build/Products/Release-iphoneos/$SCHEME.app"
+          test -d "$APP"
+          rm -rf out && mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out && zip -qry TubeFree.ipa Payload
+          ls -lh TubeFree.ipa
+
+    artifacts:
+      - out/TubeFree.ipa

@@ -76,6 +76,21 @@ Sources/
 The `.xcodeproj` is not committed — XcodeGen regenerates it, which is why the
 repo stays diff-clean and CI never fights merge conflicts on a pbxproj.
 
+### GitHub Actions
+
+`.github/workflows/build.yml` builds `TubeFree.ipa` on `macos-14` and uploads it
+as an artifact. Trigger it with a push, a tag, or the Run workflow button.
+
+`probe.yml` is a 5-second account health check. If probe is cancelled with zero
+steps, GitHub is not scheduling jobs for the account — verify the email on the
+account, set a spending limit, and retest before touching the build job.
+
+### Codemagic (works when GitHub Actions will not schedule)
+
+`codemagic.yaml` builds the same unsigned IPA on a Codemagic Mac. Add the repo at
+https://codemagic.io/apps, pick the `ios-unsigned` workflow, start the build, and
+the IPA appears under Artifacts. Free tier is ~500 macOS minutes a month.
+
 Locally on macOS:
 
 ```bash

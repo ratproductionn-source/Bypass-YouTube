@@ -1,0 +1,14 @@
+name: probe
+
+# Account health check. Runs in ~5 seconds on a Linux runner.
+# Green = GitHub will schedule jobs for this account.
+# Cancelled with zero steps = account-level block, not a YAML problem.
+on:
+  workflow_dispatch:
+
+jobs:
+  hello:
+    name: runner alive
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "runner alive on $(uname -a)"
