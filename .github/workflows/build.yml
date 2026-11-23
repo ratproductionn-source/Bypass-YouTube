@@ -32,6 +32,7 @@ jobs:
             -scheme TubeFree \
             -configuration Release \
             -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             ONLY_ACTIVE_ARCH=NO \
             ARCHS=arm64 \
