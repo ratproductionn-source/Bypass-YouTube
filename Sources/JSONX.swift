@@ -7,6 +7,7 @@ enum JSONX {
 
     static func dict(_ any: Any?) -> [String: Any]? { any as? [String: Any] }
     static func array(_ any: Any?) -> [Any]? { any as? [Any] }
+    static func string(_ any: Any?) -> String? { any as? String }
     static func number(_ any: Any?) -> Int? {
         if let i = any as? Int { return i }
         if let d = any as? Double { return Int(d) }
