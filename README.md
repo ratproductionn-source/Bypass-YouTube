@@ -78,8 +78,13 @@ repo stays diff-clean and CI never fights merge conflicts on a pbxproj.
 
 ### GitHub Actions
 
-`.github/workflows/build.yml` builds `TubeFree.ipa` on `macos-14` and uploads it
-as an artifact. Trigger it with a push, a tag, or the Run workflow button.
+`.github/workflows/build.yml` builds `TubeFree.ipa` on `macos-latest` and uploads
+it as an artifact. Trigger it with a push, a tag, or the Run workflow button.
+
+The label matters: `macos-14` resolves to the `macos-14-arm64-us-default`
+configuration, which some accounts are not entitled to and GitHub answers with
+"The configuration ... is not supported" and a 1-second cancel. `macos-latest`
+provisions on this account; `probe.yml` maps which labels work.
 
 `probe.yml` is a 5-second account health check. If probe is cancelled with zero
 steps, GitHub is not scheduling jobs for the account — verify the email on the
