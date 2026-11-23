@@ -1,7 +1,6 @@
 import Foundation
 import SwiftUI
 
-@MainActor
 final class FeedStore: ObservableObject {
     @Published var videos: [Video] = []
     @Published var query: String = ""

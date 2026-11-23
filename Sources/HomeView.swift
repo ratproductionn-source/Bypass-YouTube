@@ -2,16 +2,33 @@ import SwiftUI
 
 struct HomeView: View {
     @StateObject private var store = FeedStore()
+    @ObservedObject private var history = History.shared
+
     @State private var selection: Video?
     @State private var showSettings = false
+    @State private var suggestions: [String] = []
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle(store.isSearching ? "results" : "tubefree")
                 .navigationBarTitleDisplayMode(.inline)
-                .searchable(text: $store.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "search youtube")
+                .searchable(text: $store.query,
+                            placement: .navigationBarDrawer(displayMode: .always),
+                            prompt: "search youtube")
+                .searchSuggestions {
+                    ForEach(suggestions, id: \.self) { s in
+                        Text(s).searchCompletion(s)
+                    }
+                }
                 .onSubmit(of: .search) { Task { await store.refresh() } }
+                .task(id: store.query) {
+                    let q = store.query
+                    guard q.count >= 2, !q.isEmpty else { suggestions = []; return }
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    suggestions = (try? await InnerTube.suggest(q)) ?? []
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         if store.isSearching {
@@ -39,7 +56,7 @@ struct HomeView: View {
                 }
         }
         .sheet(item: $selection) { video in
-            PlayerScreen(video: video)
+            WatchScreen(video: video)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
@@ -59,7 +76,9 @@ struct HomeView: View {
             }
         } else {
             ScrollView {
-                LazyVStack(spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    if !store.isSearching { continueWatching }
+
                     ForEach(store.videos) { video in
                         Button {
                             selection = video
@@ -73,6 +92,63 @@ struct HomeView: View {
                 .padding(.vertical, 10)
             }
             .refreshable { await store.refresh() }
+        }
+    }
+
+    @ViewBuilder
+    private var continueWatching: some View {
+        if !history.entries.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("continue watching")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(history.entries.prefix(12)) { entry in
+                            Button {
+                                selection = Video(id: entry.id,
+                                                   title: entry.title,
+                                                   channel: entry.channel,
+                                                   thumbnail: entry.thumbnail.flatMap(URL.init(string:)),
+                                                   duration: "",
+                                                   meta: "")
+                            } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    ZStack(alignment: .bottom) {
+                                        AsyncImage(url: entry.thumbnail.flatMap(URL.init(string:))) { phase in
+                                            if case .success(let image) = phase {
+                                                image.resizable().scaledToFill()
+                                            } else {
+                                                Color(white: 0.16)
+                                            }
+                                        }
+                                        .frame(width: 176, height: 99)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                                        GeometryReader { geo in
+                                            Rectangle()
+                                                .fill(Color.red)
+                                                .frame(width: geo.size.width * entry.progress, height: 3)
+                                                .frame(maxHeight: .infinity, alignment: .bottom)
+                                        }
+                                        .frame(width: 176, height: 99)
+                                    }
+
+                                    Text(entry.title)
+                                        .font(.caption2)
+                                        .lineLimit(2)
+                                        .frame(width: 176, alignment: .leading)
+                                        .multilineTextAlignment(.leading)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, 4)
         }
     }
 }

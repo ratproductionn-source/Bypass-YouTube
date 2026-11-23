@@ -1,16 +1,18 @@
 import Foundation
 
-/// InnerTube clients. The order matters: IOS hands back an HLS manifest
-/// (separate audio/video, no ad breaks), ANDROID_VR hands back direct
-/// progressive MP4 URLs without needing a PO token, WEB_EMBEDDED is the
-/// last resort when the first two get rate-limited.
+/// InnerTube clients. Playback walks `playbackLadder` only — the plain
+/// ANDROID client needs a PO token for media, so it is used for `next`
+/// (comments, related) but never for stream resolution.
 enum Client: String, CaseIterable {
-    case ios, androidVR, webEmbedded
+    case ios, android, androidVR, webEmbedded
+
+    static let playbackLadder: [Client] = [.ios, .androidVR, .webEmbedded]
 
     var label: String {
         switch self {
-        case .ios: return "IOS"
-        case .androidVR: return "ANDROID_VR"
+        case .ios:         return "IOS"
+        case .android:     return "ANDROID"
+        case .androidVR:   return "ANDROID_VR"
         case .webEmbedded: return "WEB_EMBEDDED_PLAYER"
         }
     }
@@ -21,6 +23,7 @@ enum Client: String, CaseIterable {
     var key: String {
         switch self {
         case .ios:         return "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc"
+        case .android:     return "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w"
         case .androidVR:   return "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w"
         case .webEmbedded: return "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
         }
@@ -30,6 +33,8 @@ enum Client: String, CaseIterable {
         switch self {
         case .ios:
             return "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)"
+        case .android:
+            return "com.google.android.youtube/19.44.38 (Linux; U; Android 11) gzip"
         case .androidVR:
             return "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
         case .webEmbedded:
@@ -47,6 +52,11 @@ enum Client: String, CaseIterable {
             client["deviceModel"] = "iPhone16,2"
             client["osName"] = "iPhone"
             client["osVersion"] = "18.1.0.22B83"
+        case .android:
+            client["clientVersion"] = "19.44.38"
+            client["androidSdkVersion"] = 30
+            client["osName"] = "Android"
+            client["osVersion"] = "11"
         case .androidVR:
             client["clientVersion"] = "1.60.19"
             client["deviceMake"] = "Oculus"
@@ -69,8 +79,12 @@ enum Client: String, CaseIterable {
             "X-Goog-Api-Format-Version": "2",
             "Origin": host
         ]
-        if self == .ios { h["X-YouTube-Client-Name"] = "5" }
-        if self == .androidVR { h["X-YouTube-Client-Name"] = "28" }
+        switch self {
+        case .ios: h["X-YouTube-Client-Name"] = "5"
+        case .android: h["X-YouTube-Client-Name"] = "3"
+        case .androidVR: h["X-YouTube-Client-Name"] = "28"
+        case .webEmbedded: h["X-YouTube-Client-Name"] = "56"
+        }
         return h
     }
 }
@@ -111,7 +125,7 @@ enum InnerTube {
         return root
     }
 
-    // MARK: browse + search
+    // MARK: search + browse
 
     static func search(_ query: String) async throws -> [Video] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -119,14 +133,13 @@ enum InnerTube {
         let body: [String: Any] = [
             "context": Client.androidVR.clientContext,
             "query": trimmed,
-            "params": "EgIQAQ%3D%3D"   // videos only
+            "params": "EgIQAQ%3D%3D"      // videos only
         ]
         let root = try await post("search", body: body, client: .androidVR)
         return Parse.videos(from: root)
     }
 
     static func trending() async throws -> [Video] {
-        var collected: [Video] = []
         for browseId in ["FEtrending", "FEwhat_to_watch"] {
             let body: [String: Any] = [
                 "context": Client.androidVR.clientContext,
@@ -134,18 +147,28 @@ enum InnerTube {
             ]
             guard let root = try? await post("browse", body: body, client: .androidVR) else { continue }
             let videos = Parse.videos(from: root)
-            if !videos.isEmpty { collected = videos; break }
+            if !videos.isEmpty { return videos }
         }
-        if collected.isEmpty { throw BenchError.payload("empty feed") }
-        return collected
+        throw BenchError.payload("empty feed")
+    }
+
+    /// Channel page: header + first page of uploads.
+    static func channel(_ channelId: String) async throws -> (ChannelInfo, [Video]) {
+        let body: [String: Any] = [
+            "context": Client.android.clientContext,
+            "browseId": channelId,
+            "params": "EgZ2aWRlb3PyBgQKAjoA"     // videos tab
+        ]
+        let root = try await post("browse", body: body, client: .android)
+        return (Parse.channel(from: root, fallbackId: channelId), Parse.videos(from: root))
     }
 
     // MARK: playback
 
-    /// Walks the client ladder until one of them returns something AVPlayer can eat.
+    /// Walks the ladder until one client returns something AVPlayer can eat.
     static func playback(videoId: String) async throws -> PlaybackInfo {
         var last: Error = BenchError.noStream
-        for client in Client.allCases {
+        for client in Client.playbackLadder {
             do {
                 let info = try await playback(videoId: videoId, client: client)
                 if info.hasPlayable { return info }
@@ -164,9 +187,7 @@ enum InnerTube {
             "contentCheckOk": true,
             "racyCheckOk": true,
             "playbackContext": [
-                "contentPlaybackContext": [
-                    "html5Preference": "HTML5_PREF_WANTS"
-                ]
+                "contentPlaybackContext": ["html5Preference": "HTML5_PREF_WANTS"]
             ]
         ]
         let root = try await post("player", body: body, client: client)
@@ -178,15 +199,11 @@ enum InnerTube {
         }
 
         let details = JSONX.dict(root["videoDetails"])
-        let title = (details?["title"] as? String) ?? ""
-        let author = (details?["author"] as? String) ?? ""
-        let duration = JSONX.number(details?["lengthSeconds"]) ?? 0
-
+        let micro = JSONX.dig(root, "microformat", "playerMicroformatRenderer")
         let streaming = JSONX.dict(root["streamingData"])
+
         var hls: URL?
-        if let s = streaming?["hlsManifestUrl"] as? String {
-            hls = JSONX.url(s)
-        }
+        if let s = streaming?["hlsManifestUrl"] as? String { hls = JSONX.url(s) }
 
         var formats: [StreamFormat] = []
         for raw in JSONX.array(streaming?["formats"]) ?? [] {
@@ -194,21 +211,37 @@ enum InnerTube {
                   let itag = JSONX.number(d["itag"]),
                   let mime = d["mimeType"] as? String,
                   mime.hasPrefix("video/mp4"),
-                  let u = JSONX.url(d["url"])
-            else { continue }   // signatureCipher entries are skipped: no JS decipher on device
+                  let u = JSONX.url(d["url"])          // signatureCipher entries dropped: no JS decipher
+            else { continue }
             let height = JSONX.number(d["height"]) ?? 0
-            let label = (d["qualityLabel"] as? String) ?? "\(height)p"
-            let bitrate = JSONX.number(d["bitrate"]) ?? 0
-            formats.append(StreamFormat(id: itag, url: u, height: height,
-                                        label: label, mime: mime, bitrate: bitrate))
+            formats.append(StreamFormat(
+                id: itag,
+                url: u,
+                height: height,
+                label: (d["qualityLabel"] as? String) ?? "\(height)p",
+                mime: mime,
+                bitrate: JSONX.number(d["bitrate"]) ?? 0
+            ))
         }
         formats.sort { $0.height > $1.height }
 
-        return PlaybackInfo(videoId: videoId, title: title, author: author,
-                            duration: duration, hls: hls, formats: formats)
+        return PlaybackInfo(
+            videoId: videoId,
+            title: (details?["title"] as? String) ?? "",
+            author: (details?["author"] as? String) ?? "",
+            channelId: (details?["channelId"] as? String) ?? "",
+            description: (details?["shortDescription"] as? String) ?? "",
+            viewCount: JSONX.number(details?["viewCount"]) ?? 0,
+            published: (micro.flatMap { JSONX.dig($0, "publishDate") as? String }) ?? "",
+            duration: JSONX.number(details?["lengthSeconds"]) ?? 0,
+            isLive: (details?["isLiveContent"] as? Bool) ?? false,
+            hls: hls,
+            formats: formats
+        )
     }
 
-    /// Related videos for the "up next" strip. Failure is non-fatal everywhere.
+    // MARK: next (related + comments)
+
     static func related(videoId: String) async throws -> [Video] {
         let body: [String: Any] = [
             "context": Client.androidVR.clientContext,
@@ -217,5 +250,45 @@ enum InnerTube {
         ]
         let root = try await post("next", body: body, client: .androidVR)
         return Parse.videos(from: root)
+    }
+
+    /// First page of comments plus the token for the next page.
+    static func comments(videoId: String) async throws -> (comments: [Comment], token: String?) {
+        let body: [String: Any] = [
+            "context": Client.android.clientContext,
+            "videoId": videoId
+        ]
+        let root = try await post("next", body: body, client: .android)
+        let token = Parse.commentContinuation(in: root)
+        return (Parse.comments(from: root), token)
+    }
+
+    static func comments(continuation: String) async throws -> (comments: [Comment], token: String?) {
+        let body: [String: Any] = [
+            "context": Client.android.clientContext,
+            "continuation": continuation
+        ]
+        let root = try await post("next", body: body, client: .android)
+        return (Parse.comments(from: root), Parse.commentContinuation(in: root))
+    }
+
+    // MARK: search suggestions
+
+    static func suggest(_ query: String) async throws -> [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2,
+              let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl=en&q=\(encoded)")
+        else { return [] }
+
+        var request = URLRequest(url: url)
+        request.setValue(Client.webEmbedded.userAgent, forHTTPHeaderField: "User-Agent")
+
+        let (data, _) = try await session.data(for: request)
+        guard let array = try JSONSerialization.jsonObject(with: data) as? [Any],
+              array.count > 1,
+              let items = array[1] as? [Any]
+        else { return [] }
+        return items.compactMap { $0 as? String }
     }
 }

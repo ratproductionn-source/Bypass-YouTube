@@ -19,21 +19,32 @@ struct StreamFormat: Identifiable, Hashable {
     let mime: String
     let bitrate: Int
 
-    var display: String {
-        label.isEmpty ? "\(height)p" : label
-    }
+    var display: String { label.isEmpty ? "\(height)p" : label }
 }
 
-/// Everything the player needs for one video.
+/// Everything the player and the watch screen need for one video.
 struct PlaybackInfo: Hashable {
     let videoId: String
     let title: String
     let author: String
+    let channelId: String
+    let description: String
+    let viewCount: Int
+    let published: String
     let duration: Int
+    let isLive: Bool
     let hls: URL?
     let formats: [StreamFormat]
 
     var hasPlayable: Bool { hls != nil || !formats.isEmpty }
+
+    var viewsText: String {
+        guard viewCount > 0 else { return "" }
+        if viewCount >= 1_000_000_000 { return String(format: "%.1fB views", Double(viewCount) / 1_000_000_000) }
+        if viewCount >= 1_000_000 { return String(format: "%.1fM views", Double(viewCount) / 1_000_000) }
+        if viewCount >= 1_000 { return String(format: "%.1fK views", Double(viewCount) / 1_000) }
+        return "\(viewCount) views"
+    }
 }
 
 enum BenchError: LocalizedError {
